@@ -36,19 +36,65 @@ export const analyzeMarket = async (
 
   if (isDeep) {
     prompt = `
-      Perform a deep research analysis for this prediction market.
-      
-      CONTEXT:
-      ${marketContext}
+You are an expert prediction market analyst with deep expertise in probability assessment, risk management, and market efficiency analysis. Perform a comprehensive deep research analysis for this prediction market.
 
-      TASK:
-      1. Search for the latest real-time news, polls, and expert sentiment related to this exact question.
-      2. Identify any breaking news or recent events that might not be fully priced in yet.
-      3. Compare the "real-world" estimated probability vs the market's current probabilities.
-      4. Determine if there is a discrepancy (Edge).
+## MARKET CONTEXT
+${marketContext}
 
-      OUTPUT FORMAT:
-      Return a detailed analysis in JSON with the following fields: summary, recommendation (BUY, SELL, HOLD, AVOID), confidenceScore (0-100), reasoning (array of strings).
+## ANALYSIS FRAMEWORK
+
+### 1. INFORMATION GATHERING
+Search for and analyze:
+- Latest news articles within the past 7 days related to this market
+- Recent polls, surveys, or statistical data if applicable
+- Expert opinions and analyst commentary from credible sources
+- Social media sentiment and trending discussions
+- Any breaking developments that may not be fully priced into the market yet
+
+### 2. EDGE DETECTION ANALYSIS
+Conduct a rigorous probability assessment:
+- Calculate your estimated real-world probability for the primary outcome
+- Compare against the current market prices shown above
+- Identify the Edge: (Your Estimated Probability - Market Probability)
+- Determine if this edge is statistically significant (typically >5% difference)
+- Explain what specific information the market may be missing, underweighting, or overweighting
+- Consider if there are behavioral biases affecting the market (recency bias, overconfidence, etc.)
+
+### 3. RISK ASSESSMENT
+Evaluate and enumerate:
+- Key risks that could invalidate your thesis (be specific)
+- Time sensitivity: how quickly could new information change the situation?
+- Information uncertainty: how reliable and complete are your sources?
+- Black swan potential: low-probability events that could dramatically flip the outcome
+- Execution risk: liquidity and slippage concerns for larger positions
+
+### 4. MARKET EFFICIENCY EVALUATION
+Analyze the market structure:
+- Is the trading volume sufficient for reliable price discovery?
+- Does the liquidity profile suggest informed institutional trading or retail-driven speculation?
+- Are there signs of smart money positioning (large trades, unusual volume patterns)?
+- How does this market's efficiency compare to similar prediction markets?
+
+### 5. SYNTHESIS AND RECOMMENDATION
+Based on ALL the above analysis, synthesize your findings into a clear, actionable recommendation. Consider:
+- The size and reliability of any identified edge
+- Risk-adjusted expected value
+- Position sizing implications based on confidence level
+
+## OUTPUT FORMAT
+Return a JSON object with these exact fields:
+{
+  "summary": "2-3 sentence executive summary highlighting the key insight and recommendation",
+  "recommendation": "BUY | SELL | HOLD | AVOID",
+  "confidenceScore": 0-100,
+  "estimatedProbability": "Your estimated real probability as a percentage (e.g., '65%')",
+  "edgePercentage": "The identified edge as +/- percentage (e.g., '+8%' or '-5%')",
+  "reasoning": ["Array of 4-6 key factors supporting your recommendation, ordered by importance"],
+  "keyRisks": ["Array of 2-4 specific risks that could invalidate this analysis"],
+  "marketEfficiency": "LOW | MEDIUM | HIGH"
+}
+
+Be precise, data-driven, and objective in your analysis. Avoid vague statements. Quantify where possible.
     `;
   } else {
     prompt = `
@@ -138,6 +184,11 @@ export const analyzeMarket = async (
     recommendation: parsed.recommendation as any,
     confidenceScore: parsed.confidenceScore,
     reasoning: parsed.reasoning,
+    // Include enhanced deep analysis fields when available
+    estimatedProbability: parsed.estimatedProbability,
+    edgePercentage: parsed.edgePercentage,
+    keyRisks: parsed.keyRisks,
+    marketEfficiency: parsed.marketEfficiency,
     sources: sources.length > 0 ? sources : undefined
   };
 };

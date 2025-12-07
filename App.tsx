@@ -16,10 +16,16 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Theme state: 'dark' by default
-  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  // Theme state: Initialize from localStorage with fallback to 'dark'
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('theme');
+      return (stored === 'light' || stored === 'dark') ? stored : 'dark';
+    }
+    return 'dark';
+  });
 
-  // Handle Theme Toggle
+  // Handle Theme Toggle and persist to localStorage
   useEffect(() => {
     const root = window.document.documentElement;
     if (theme === 'dark') {
@@ -27,6 +33,8 @@ function App() {
     } else {
       root.classList.remove('dark');
     }
+    // Persist theme preference to localStorage
+    localStorage.setItem('theme', theme);
   }, [theme]);
 
   const toggleTheme = () => {

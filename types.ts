@@ -29,6 +29,11 @@ export interface AnalysisResult {
   recommendation: 'BUY' | 'SELL' | 'HOLD' | 'AVOID';
   confidenceScore: number; // 0 to 100
   reasoning: string[];
+  // Enhanced deep analysis fields
+  estimatedProbability?: string;
+  edgePercentage?: string;
+  keyRisks?: string[];
+  marketEfficiency?: 'LOW' | 'MEDIUM' | 'HIGH';
   sources?: Array<{
     title: string;
     url: string;

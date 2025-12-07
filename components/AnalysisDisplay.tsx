@@ -121,6 +121,62 @@ const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, mode, isLoadi
               </ul>
             </div>
 
+            {/* Edge Analysis (Deep Mode Only) */}
+            {mode === AnalysisMode.DEEP && (result.estimatedProbability || result.edgePercentage || result.marketEfficiency) && (
+              <div className="pt-6 border-t border-gray-100 dark:border-slate-800">
+                <h3 className="text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                  Edge Analysis
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {result.estimatedProbability && (
+                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-1">Est. Probability</div>
+                      <div className="text-xl font-bold text-gray-900 dark:text-white">{result.estimatedProbability}</div>
+                    </div>
+                  )}
+                  {result.edgePercentage && (
+                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-1">Identified Edge</div>
+                      <div className={`text-xl font-bold ${result.edgePercentage.startsWith('+') ? 'text-green-600 dark:text-green-400' : result.edgePercentage.startsWith('-') ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+                        {result.edgePercentage}
+                      </div>
+                    </div>
+                  )}
+                  {result.marketEfficiency && (
+                    <div className="p-4 rounded-lg bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-1">Market Efficiency</div>
+                      <div className={`text-sm font-bold px-2 py-1 rounded inline-block ${
+                        result.marketEfficiency === 'LOW' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                        result.marketEfficiency === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        {result.marketEfficiency}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Key Risks (Deep Mode Only) */}
+            {mode === AnalysisMode.DEEP && result.keyRisks && result.keyRisks.length > 0 && (
+              <div className="pt-6 border-t border-gray-100 dark:border-slate-800">
+                <h3 className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                  Key Risks
+                </h3>
+                <ul className="space-y-3">
+                  {result.keyRisks.map((risk, idx) => (
+                    <li key={idx} className="flex gap-3 text-sm text-gray-600 dark:text-slate-400 leading-relaxed">
+                      <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-orange-500 flex-shrink-0"></div>
+                      <span>{risk}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Sources (Deep Mode Only) */}
             {mode === AnalysisMode.DEEP && result.sources && result.sources.length > 0 && (
               <div className="pt-6 border-t border-gray-100 dark:border-slate-800">

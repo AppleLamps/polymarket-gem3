@@ -57,10 +57,98 @@ const parsePolymarketUrl = (url: string): ParsedUrl => {
 /**
  * Format currency
  */
-const formatMoney = (amount: number): string => {
+const formatMoney = (rawAmount: number | string | undefined | null): string => {
+  const amount = Number(rawAmount) || 0;
   if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}m`;
   if (amount >= 1_000) return `$${(amount / 1_000).toFixed(1)}k`;
   return `$${amount.toFixed(0)}`;
+};
+
+const clampProbability = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  const normalized = value > 1.01 ? value / 100 : value;
+  return Math.max(0, Math.min(1, normalized));
+};
+
+const asArray = (value: unknown): any[] | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      return trimmed
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+  }
+  return undefined;
+};
+
+const parseStringArray = (value: unknown): string[] | undefined => {
+  const arr = asArray(value);
+  if (!arr) return undefined;
+  return arr.map((entry) => String(entry));
+};
+
+const parseNumberArray = (value: unknown): number[] | undefined => {
+  const arr = asArray(value);
+  if (!arr) return undefined;
+  const numbers = arr.map((entry) => Number(entry));
+  if (numbers.some((num) => Number.isNaN(num))) {
+    return undefined;
+  }
+  return numbers;
+};
+
+const buildOutcomes = (market: any): Outcome[] => {
+  const names =
+    parseStringArray(market.outcomes) ||
+    parseStringArray(market.groupOutcomes) ||
+    parseStringArray(market.groupItemTitle ? [market.groupItemTitle] : undefined) ||
+    parseStringArray(market.question ? [market.question] : undefined);
+
+  const priceSource = market.outcomePrices ?? market.prices ?? market.outcomeProbability;
+  const probabilities = parseNumberArray(priceSource);
+
+  if (names && probabilities && names.length && probabilities.length) {
+    const usableLength = Math.min(names.length, probabilities.length);
+    const outcomes = [];
+    for (let i = 0; i < usableLength; i += 1) {
+      outcomes.push({
+        name: names[i],
+        probability: clampProbability(probabilities[i]),
+        price: clampProbability(probabilities[i]),
+      });
+    }
+    return outcomes.sort((a, b) => b.probability - a.probability);
+  }
+
+  return [
+    { name: "Yes", probability: 0.5, price: 0.5 },
+    { name: "No", probability: 0.5, price: 0.5 },
+  ];
+};
+
+const selectMarket = (markets: any[], targetId?: string) => {
+  if (!Array.isArray(markets) || markets.length === 0) return undefined;
+  if (targetId) {
+    const viaId = markets.find((market) => String(market.id) === String(targetId));
+    if (viaId) return viaId;
+  }
+
+  const activeMarket = markets.find((market) => market.active);
+  if (activeMarket) return activeMarket;
+
+  return markets.reduce((prev, current) => {
+    const prevVolume = Number(prev?.volumeNum ?? prev?.volume ?? 0);
+    const currentVolume = Number(current?.volumeNum ?? current?.volume ?? 0);
+    return currentVolume > prevVolume ? current : prev;
+  }, markets[0]);
 };
 
 /**
@@ -124,8 +212,6 @@ export const getMarketData = async (url: string): Promise<MarketData> => {
 
   // 4. Search Fallback
   try {
-    // Clean slug for search
-    const query = slug.replace(/-/g, ' ');
     const searchData = await fetchWithTimeout(`${BASE_URL}/markets?limit=1&active=true&closed=false&order=volume24hr&ascending=false&slug=${slug}`);
     if (searchData && searchData.length > 0) {
       return transformMarketData(searchData[0]);
@@ -157,61 +243,29 @@ const fetchWithTimeout = async (url: string, timeout = 12000) => {
  * Transform Event API response
  */
 const transformEventData = (event: any, targetId?: string): MarketData => {
-  // An event can have multiple markets. 
-  // If targetId is provided, find that specific market.
-  // Otherwise, find the market with the highest volume or the main market.
-  
-  let markets = event.markets || [];
-  let selectedMarket = markets.find((m: any) => m.id === targetId) || markets[0];
-  
-  // If it's a "Group" market (e.g. Election Winner), the outcomes might be spread across markets
-  // OR strictly inside one market object. 
-  // Polymarket API structure: Event -> Markets. 
-  // For "Winner" events, often markets[0] contains the outcomes if it's a generic structure,
-  // OR there are multiple binary markets. 
-  
-  // Strategy: If the selected market looks like a binary YES/NO, but the event title implies a list (e.g. "Who will win?"),
-  // we might want to aggregate. However, to keep it simple for this app, we will focus on the selected market's outcomes.
-  
-  // Note: For multi-outcome markets in Gamma API, `outcomes` field in the market object usually has the names.
-  // `outcomePrices` has the prices.
-  
-  const outcomes: Outcome[] = [];
-  
-  // Check if we have outcome names and prices (Group market)
-  if (selectedMarket.outcomes && selectedMarket.outcomePrices) {
-    const names = JSON.parse(selectedMarket.outcomes); // It's often a stringified array
-    const prices = JSON.parse(selectedMarket.outcomePrices);
-    
-    names.forEach((name: string, idx: number) => {
-      outcomes.push({
-        name: name,
-        probability: Number(prices[idx]) || 0,
-        price: Number(prices[idx]) || 0
-      });
-    });
-  } 
-  // Fallback for simple binary markets if outcomes isn't parsed correctly or is simplified
-  else {
-     outcomes.push({ name: "Yes", probability: 0.5, price: 0.5 });
-     outcomes.push({ name: "No", probability: 0.5, price: 0.5 });
+  const markets = Array.isArray(event.markets) ? event.markets : [];
+  const selectedMarket = selectMarket(markets, targetId);
+
+  if (!selectedMarket) {
+    throw new Error("Event returned no markets to evaluate");
   }
 
-  // Sort by probability desc
-  outcomes.sort((a, b) => b.probability - a.probability);
+  const outcomes = buildOutcomes(selectedMarket);
+  const volumeNum = Number(selectedMarket.volumeNum ?? selectedMarket.volume ?? 0);
+  const liquidityNum = Number(selectedMarket.liquidityNum ?? selectedMarket.liquidity ?? 0);
 
   return {
     id: selectedMarket.id,
-    question: event.title, // Event title is usually better formatted than market question
+    question: event.title || selectedMarket.question,
     description: event.description || selectedMarket.description,
     outcomes,
     url: `https://polymarket.com/event/${event.slug}`,
-    volume: formatMoney(Number(selectedMarket.volume || 0)),
-    volumeNum: Number(selectedMarket.volume || 0),
-    liquidity: formatMoney(Number(selectedMarket.liquidity || 0)),
-    endDate: selectedMarket.endDate,
-    active: selectedMarket.active,
-    groupItemTitle: selectedMarket.groupItemTitle
+    volume: formatMoney(volumeNum),
+    volumeNum,
+    liquidity: formatMoney(liquidityNum),
+    endDate: selectedMarket.endDate ?? event.endDate,
+    active: Boolean(selectedMarket.active ?? event.active),
+    groupItemTitle: selectedMarket.groupItemTitle,
   };
 };
 
@@ -219,50 +273,22 @@ const transformEventData = (event: any, targetId?: string): MarketData => {
  * Transform Market API response
  */
 const transformMarketData = (market: any): MarketData => {
-  const outcomes: Outcome[] = [];
-  
-  if (market.outcomes && market.outcomePrices) {
-    let names: string[] = [];
-    try {
-        names = JSON.parse(market.outcomes);
-    } catch {
-        names = market.outcomes; // Sometimes it's already an array
-    }
-    
-    let prices: string[] = [];
-    try {
-        prices = JSON.parse(market.outcomePrices);
-    } catch {
-        prices = market.outcomePrices;
-    }
-
-    names.forEach((name, idx) => {
-      outcomes.push({
-        name: name,
-        probability: Number(prices[idx]) || 0,
-        price: Number(prices[idx]) || 0
-      });
-    });
-  } else {
-    // Fallback binary
-    outcomes.push({ name: "Yes", probability: 0.5, price: 0.5 });
-    outcomes.push({ name: "No", probability: 0.5, price: 0.5 });
-  }
-
-  outcomes.sort((a, b) => b.probability - a.probability);
+  const outcomes = buildOutcomes(market);
+  const volumeNum = Number(market.volumeNum ?? market.volume ?? 0);
+  const liquidityNum = Number(market.liquidityNum ?? market.liquidity ?? 0);
 
   return {
     id: market.id,
-    question: market.question,
-    description: market.description,
+    question: market.question || market.title,
+    description: market.description || market.resolution || market.resolutionRules,
     outcomes,
     url: `https://polymarket.com/market/${market.slug}`,
-    volume: formatMoney(Number(market.volume || 0)),
-    volumeNum: Number(market.volume || 0),
-    liquidity: formatMoney(Number(market.liquidity || 0)),
+    volume: formatMoney(volumeNum),
+    volumeNum,
+    liquidity: formatMoney(liquidityNum),
     endDate: market.endDate,
-    active: market.active,
-    groupItemTitle: market.groupItemTitle
+    active: Boolean(market.active),
+    groupItemTitle: market.groupItemTitle,
   };
 };
 

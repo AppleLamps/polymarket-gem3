@@ -1,0 +1,5 @@
+{
+  "name": "Polymarket Edge Explorer",
+  "description": "AI-powered prediction market analyzer that combines real-time odds with deep web research to identify betting opportunities.",
+  "requestFramePermissions": []
+}

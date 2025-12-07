@@ -8,6 +8,17 @@ interface AnalysisDisplayProps {
   onAnalyze: (mode: AnalysisMode) => void;
 }
 
+const getHostname = (rawUrl: string) => {
+  if (!rawUrl) return '';
+  const withProtocol = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+  try {
+    const url = new URL(withProtocol);
+    return url.hostname.replace(/^www\./, '');
+  } catch {
+    return rawUrl;
+  }
+};
+
 const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, mode, isLoading, onAnalyze }) => {
   
   const getRecStyle = (rec: string) => {
@@ -142,7 +153,7 @@ const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({ result, mode, isLoadi
                           {source.title}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-slate-500 truncate mt-0.5">
-                          {new URL(source.url).hostname}
+                          {getHostname(source.url)}
                         </div>
                       </div>
                       <svg className="w-4 h-4 text-gray-400 group-hover:text-purple-500 dark:text-slate-600 dark:group-hover:text-purple-400 transform group-hover:translate-x-1 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>

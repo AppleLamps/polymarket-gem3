@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import MarketCard from './components/MarketCard';
 import AnalysisDisplay from './components/AnalysisDisplay';
 import Button from './components/Button';
@@ -33,6 +33,48 @@ function App() {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const analysisRequestId = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      analysisAbortRef.current?.abort();
+    };
+  }, []);
+
+  const handleAnalyze = useCallback(async (data: MarketData, selectedMode: AnalysisMode) => {
+    const requestId = ++analysisRequestId.current;
+
+    if (analysisAbortRef.current) {
+      analysisAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
+
+    setIsAnalyzing(true);
+    setMode(selectedMode);
+
+    try {
+      const result = await analyzeMarket(data, selectedMode, { signal: controller.signal });
+      if (requestId === analysisRequestId.current) {
+        setAnalysis(result);
+        setError(null);
+      }
+    } catch (err: any) {
+      if (controller.signal.aborted) {
+        return;
+      }
+      console.error(err);
+      if (requestId === analysisRequestId.current) {
+        setError(err?.message || "Analysis failed. Please try again.");
+      }
+    } finally {
+      if (requestId === analysisRequestId.current) {
+        setIsAnalyzing(false);
+      }
+    }
+  }, []);
+
   // Suggested markets for demo
   const suggestions = [
     "presidential-election-winner-2024",
@@ -60,23 +102,8 @@ function App() {
     }
   };
 
-  const handleAnalyze = async (data: MarketData, selectedMode: AnalysisMode) => {
-    setIsAnalyzing(true);
-    setMode(selectedMode);
-    
-    try {
-      const result = await analyzeMarket(data, selectedMode);
-      setAnalysis(result);
-    } catch (err: any) {
-      console.error(err);
-      setError("Analysis failed. Please try again.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
   const onModeChange = (newMode: AnalysisMode) => {
-    if (marketData && !isAnalyzing) {
+    if (marketData) {
       handleAnalyze(marketData, newMode);
     } else {
       setMode(newMode);

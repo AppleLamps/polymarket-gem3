@@ -1,143 +1,151 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { MarketData, AnalysisResult, AnalysisMode } from "../types";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const GATEWAY_URL =
+  import.meta.env.VITE_GEMINI_GATEWAY_URL ||
+  import.meta.env.VITE_ANALYSIS_ENDPOINT ||
+  import.meta.env.VITE_GEMINI_APP_URL;
 
-/**
- * Analyzes the market data using Gemini
- */
-export const analyzeMarket = async (
-  market: MarketData, 
-  mode: AnalysisMode
-): Promise<AnalysisResult> => {
-  
-  const isDeep = mode === AnalysisMode.DEEP;
-  
-  // Upgrade to Gemini 3 Pro for state-of-the-art reasoning
-  const modelId = "gemini-3-pro-preview"; 
+const GATEWAY_KEY =
+  import.meta.env.VITE_GEMINI_GATEWAY_KEY ||
+  import.meta.env.VITE_ANALYSIS_API_KEY ||
+  import.meta.env.VITE_GEMINI_APP_KEY;
 
-  const marketContext = `
-    Market Question: ${market.question}
-    Description: ${market.description || 'N/A'}
-    End Date: ${market.endDate || 'N/A'}
-    
-    Financial Metrics:
-    - Volume: ${market.volume}
-    - Liquidity: ${market.liquidity || 'N/A'}
-    
-    Current Outcomes & Prices:
-    ${market.outcomes.map(o => `- ${o.name}: ${(o.probability * 100).toFixed(1)}% (Price: ${o.price})`).join('\n')}
-    
-    URL: ${market.url}
-  `;
+const REQUIRED_FIELDS: Array<keyof AnalysisResult> = [
+  "summary",
+  "recommendation",
+  "confidenceScore",
+  "reasoning",
+];
 
-  let prompt = "";
+const VALID_RECOMMENDATIONS: AnalysisResult["recommendation"][] = [
+  "BUY",
+  "SELL",
+  "HOLD",
+  "AVOID",
+];
 
-  if (isDeep) {
-    prompt = `
-      Perform a deep research analysis for this prediction market.
-      
-      CONTEXT:
-      ${marketContext}
-
-      TASK:
-      1. Search for the latest real-time news, polls, and expert sentiment related to this exact question.
-      2. Identify any breaking news or recent events that might not be fully priced in yet.
-      3. Compare the "real-world" estimated probability vs the market's current probabilities.
-      4. Determine if there is a discrepancy (Edge).
-
-      OUTPUT FORMAT:
-      Return a detailed analysis in JSON with the following fields: summary, recommendation (BUY, SELL, HOLD, AVOID), confidenceScore (0-100), reasoning (array of strings).
-    `;
-  } else {
-    prompt = `
-      Perform a quick technical and fundamental analysis of this prediction market based on the provided odds.
-
-      CONTEXT:
-      ${marketContext}
-
-      TASK:
-      1. Analyze the implied probabilities and market structure (volume, liquidity).
-      2. Check for arbitrage, overconfidence, or basic inconsistencies.
-      3. Based *only* on the provided market structure and general knowledge, does this look efficient?
-
-      OUTPUT FORMAT:
-      Return a concise summary in JSON with the following fields: summary, recommendation (BUY, SELL, HOLD, AVOID), confidenceScore (0-100), reasoning (array of strings).
-    `;
+const sanitizeJsonText = (rawText: string): string => {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new Error("Empty analysis response");
   }
 
-  const analysisSchema: Schema = {
-    type: Type.OBJECT,
-    properties: {
-      summary: { type: Type.STRING },
-      recommendation: { type: Type.STRING, enum: ['BUY', 'SELL', 'HOLD', 'AVOID'] },
-      confidenceScore: { type: Type.INTEGER },
-      reasoning: { 
-        type: Type.ARRAY, 
-        items: { type: Type.STRING } 
-      }
-    },
-    required: ["summary", "recommendation", "confidenceScore", "reasoning"]
-  };
-
-  const config: any = {
-    // Gemini 3 specific configuration
-    // 'thinkingBudget' guides the model on the number of thinking tokens to use.
-    thinkingConfig: {
-        thinkingBudget: isDeep ? 16384 : 2048
-    }
-  };
-
-  if (isDeep) {
-    // Guidelines: When using Google Search, do not use responseMimeType or responseSchema
-    config.tools = [{ googleSearch: {} }];
-  } else {
-    config.responseMimeType = "application/json";
-    config.responseSchema = analysisSchema;
+  if (trimmed.startsWith("```")) {
+    return trimmed.replace(/^```[a-zA-Z]*\s*/u, "").replace(/```$/u, "").trim();
   }
 
-  const response = await ai.models.generateContent({
-    model: modelId,
-    contents: prompt,
-    config: config
-  });
-
-  let responseText = response.text;
-  if (!responseText) throw new Error("No analysis generated");
-
-  // Clean up potential markdown code blocks if JSON mode wasn't strictly enforced (Deep mode)
-  if (responseText.startsWith('```json')) {
-    responseText = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-  } else if (responseText.startsWith('```')) {
-    responseText = responseText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  // Try to extract the first JSON object from an unstructured response
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
   }
 
-  const parsed = JSON.parse(responseText);
+  return trimmed;
+};
 
-  // Extract grounding metadata if available (for sources)
-  let sources: { title: string; url: string }[] = [];
-  
-  const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-  if (groundingChunks) {
-    groundingChunks.forEach((chunk: any) => {
-      if (chunk.web?.uri && chunk.web?.title) {
-        sources.push({
-          title: chunk.web.title,
-          url: chunk.web.uri
-        });
-      }
-    });
+const coerceReasoning = (input: unknown): string[] => {
+  if (Array.isArray(input)) {
+    return input.map((item) => String(item));
+  }
+  if (typeof input === "string" && input.length > 0) {
+    return [input];
+  }
+  return ["No reasoning returned by analysis service."];
+};
+
+const normalizePayload = (payload: any): AnalysisResult => {
+  const missing = REQUIRED_FIELDS.filter(
+    (field) => payload?.[field] === undefined || payload?.[field] === null
+  );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Analysis response missing required fields: ${missing.join(", ")}`
+    );
   }
 
-  // Deduplicate sources
-  sources = sources.filter((v, i, a) => a.findIndex(t => (t.url === v.url)) === i);
+  const confidenceScore = Number(payload.confidenceScore);
+  const normalizedRecommendation = String(payload.recommendation || "").toUpperCase();
+  const recommendation = VALID_RECOMMENDATIONS.includes(
+    normalizedRecommendation as AnalysisResult["recommendation"]
+  )
+    ? (normalizedRecommendation as AnalysisResult["recommendation"])
+    : "HOLD";
 
   return {
-    summary: parsed.summary,
-    recommendation: parsed.recommendation as any,
-    confidenceScore: parsed.confidenceScore,
-    reasoning: parsed.reasoning,
-    sources: sources.length > 0 ? sources : undefined
+    summary: String(payload.summary),
+    recommendation,
+    confidenceScore: Number.isFinite(confidenceScore)
+      ? Math.max(0, Math.min(100, Math.round(confidenceScore)))
+      : 0,
+    reasoning: coerceReasoning(payload.reasoning),
+    sources: Array.isArray(payload.sources)
+      ? payload.sources
+          .filter((s) => s && s.title && s.url)
+          .map((s) => ({ title: String(s.title), url: String(s.url) }))
+      : undefined,
   };
+};
+
+const decodeResponse = async (response: Response): Promise<AnalysisResult> => {
+  const contentType = response.headers.get("content-type");
+
+  if (contentType?.includes("application/json")) {
+    const data = await response.json();
+    return normalizePayload(data);
+  }
+
+  const text = await response.text();
+  try {
+    const cleaned = sanitizeJsonText(text);
+    return normalizePayload(JSON.parse(cleaned));
+  } catch (err) {
+    throw new Error(
+      `Failed to parse analysis response: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+};
+
+const assertGatewayConfigured = () => {
+  if (!GATEWAY_URL) {
+    throw new Error(
+      "Missing VITE_GEMINI_GATEWAY_URL (or VITE_ANALYSIS_ENDPOINT) environment variable."
+    );
+  }
+};
+
+export const analyzeMarket = async (
+  market: MarketData,
+  mode: AnalysisMode
+): Promise<AnalysisResult> => {
+  assertGatewayConfigured();
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  if (GATEWAY_KEY) {
+    headers["x-api-key"] = GATEWAY_KEY;
+  }
+
+  const response = await fetch(GATEWAY_URL!, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      mode,
+      market,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Analysis gateway error (${response.status}): ${errorText || response.statusText}`
+    );
+  }
+
+  return decodeResponse(response);
 };

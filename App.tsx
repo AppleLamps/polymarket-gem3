@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import MarketCard from './components/MarketCard';
 import AnalysisDisplay from './components/AnalysisDisplay';
 import Button from './components/Button';
-import { getMarketData } from './services/polymarketService';
+import { getMarketData, getTrendingMarkets, TrendingMarket } from './services/polymarketService';
 import { analyzeMarket } from './services/geminiService';
 import { MarketData, AnalysisResult, AnalysisMode } from './types';
 
@@ -19,6 +20,9 @@ function App() {
   // Theme state: 'dark' by default
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
+  // Trending Markets State
+  const [trendingMarkets, setTrendingMarkets] = useState<TrendingMarket[]>([]);
+
   // Handle Theme Toggle
   useEffect(() => {
     const root = window.document.documentElement;
@@ -29,58 +33,37 @@ function App() {
     }
   }, [theme]);
 
+  // Fetch Trending Markets on Mount
+  useEffect(() => {
+    const fetchTrending = async () => {
+      try {
+        const markets = await getTrendingMarkets();
+        if (markets.length > 0) {
+          setTrendingMarkets(markets);
+        } else {
+          // Fallback if API fails
+          setTrendingMarkets([
+             { title: "2024 Presidential Election Winner", slug: "presidential-election-winner-2024" },
+             { title: "Bitcoin Price 2024", slug: "bitcoin-price-above-100k-2024" },
+             { title: "Fed Interest Rate Cuts", slug: "will-fed-cut-rates-in-march-2024" }
+          ]);
+        }
+      } catch (e) {
+        console.error("Failed to load trending markets", e);
+        // Fallback
+        setTrendingMarkets([
+             { title: "2024 Presidential Election Winner", slug: "presidential-election-winner-2024" },
+             { title: "Bitcoin Price 2024", slug: "bitcoin-price-above-100k-2024" },
+             { title: "Fed Interest Rate Cuts", slug: "will-fed-cut-rates-in-march-2024" }
+        ]);
+      }
+    };
+    fetchTrending();
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
-
-  const analysisAbortRef = useRef<AbortController | null>(null);
-  const analysisRequestId = useRef(0);
-
-  useEffect(() => {
-    return () => {
-      analysisAbortRef.current?.abort();
-    };
-  }, []);
-
-  const handleAnalyze = useCallback(async (data: MarketData, selectedMode: AnalysisMode) => {
-    const requestId = ++analysisRequestId.current;
-
-    if (analysisAbortRef.current) {
-      analysisAbortRef.current.abort();
-    }
-    const controller = new AbortController();
-    analysisAbortRef.current = controller;
-
-    setIsAnalyzing(true);
-    setMode(selectedMode);
-
-    try {
-      const result = await analyzeMarket(data, selectedMode, { signal: controller.signal });
-      if (requestId === analysisRequestId.current) {
-        setAnalysis(result);
-        setError(null);
-      }
-    } catch (err: any) {
-      if (controller.signal.aborted) {
-        return;
-      }
-      console.error(err);
-      if (requestId === analysisRequestId.current) {
-        setError(err?.message || "Analysis failed. Please try again.");
-      }
-    } finally {
-      if (requestId === analysisRequestId.current) {
-        setIsAnalyzing(false);
-      }
-    }
-  }, []);
-
-  // Suggested markets for demo
-  const suggestions = [
-    "presidential-election-winner-2024",
-    "bitcoin-price-above-100k-2024",
-    "will-fed-cut-rates-in-march-2024"
-  ];
 
   const handleFetch = async (inputUrl: string) => {
     if (!inputUrl) return;
@@ -102,8 +85,23 @@ function App() {
     }
   };
 
+  const handleAnalyze = async (data: MarketData, selectedMode: AnalysisMode) => {
+    setIsAnalyzing(true);
+    setMode(selectedMode);
+    
+    try {
+      const result = await analyzeMarket(data, selectedMode);
+      setAnalysis(result);
+    } catch (err: any) {
+      console.error(err);
+      setError("Analysis failed. Please try again.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const onModeChange = (newMode: AnalysisMode) => {
-    if (marketData) {
+    if (marketData && !isAnalyzing) {
       handleAnalyze(marketData, newMode);
     } else {
       setMode(newMode);
@@ -190,23 +188,28 @@ function App() {
             </div>
           </div>
 
-          {/* Quick Suggestions */}
+          {/* Trending Markets */}
           {!marketData && (
             <div className="mt-8 text-center animate-fade-in" style={{ animationDelay: '0.1s' }}>
               <p className="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-widest mb-4">Trending Markets</p>
               <div className="flex flex-wrap justify-center gap-3">
-                {suggestions.map((s) => (
+                {trendingMarkets.map((market) => (
                   <button
-                    key={s}
+                    key={market.slug}
                     onClick={() => {
-                      setUrl(s);
-                      handleFetch(s);
+                      const fullUrl = `https://polymarket.com/event/${market.slug}`;
+                      setUrl(fullUrl);
+                      handleFetch(fullUrl);
                     }}
-                    className="text-sm px-4 py-2 rounded-full bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700 hover:border-gray-400 dark:hover:border-slate-500 hover:shadow-sm transition-all"
+                    className="text-sm px-4 py-2 rounded-full bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 border border-gray-200 dark:border-slate-700 hover:border-gray-400 dark:hover:border-slate-500 hover:shadow-sm transition-all max-w-[240px] truncate"
+                    title={market.title}
                   >
-                    {s.split('-').slice(0, 3).join(' ')}...
+                    {market.title}
                   </button>
                 ))}
+                {trendingMarkets.length === 0 && (
+                  <span className="text-gray-400 text-sm italic">Loading trending markets...</span>
+                )}
               </div>
             </div>
           )}

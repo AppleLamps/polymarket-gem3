@@ -3,6 +3,11 @@ import { MarketData, Outcome } from '../types';
 
 const BASE_URL = 'https://gamma-api.polymarket.com';
 
+export interface TrendingMarket {
+  slug: string;
+  title: string;
+}
+
 /**
  * Parsed URL information
  */
@@ -56,6 +61,27 @@ const formatMoney = (amount: number): string => {
   if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}m`;
   if (amount >= 1_000) return `$${(amount / 1_000).toFixed(1)}k`;
   return `$${amount.toFixed(0)}`;
+};
+
+/**
+ * Fetch top trending markets (Events)
+ */
+export const getTrendingMarkets = async (): Promise<TrendingMarket[]> => {
+  try {
+    // Fetch top 5 events by 24h volume
+    const data = await fetchWithTimeout(`${BASE_URL}/events?limit=5&active=true&closed=false&order=volume24hr&ascending=false`);
+    
+    if (Array.isArray(data)) {
+      return data.map((event: any) => ({
+        slug: event.slug,
+        title: event.title
+      }));
+    }
+    return [];
+  } catch (e) {
+    console.warn("Failed to fetch trending markets", e);
+    return [];
+  }
 };
 
 /**
